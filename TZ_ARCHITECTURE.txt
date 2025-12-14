@@ -1,0 +1,838 @@
+================================================================================
+                   ТЕХНІЧНЕ ЗАВДАННЯ ТА АРХІТЕКТУРА
+                      RAG-АСИСТЕНТ ДЛЯ СТУДЕНТІВ СУМДУ
+                              MVP VERSION
+================================================================================
+
+ДАТА СТВОРЕННЯ: 2025-12-14
+ВЕРСІЯ: 1.0 (MVP)
+
+================================================================================
+1. МЕТА ПРОЕКТУ
+================================================================================
+
+Розробка мінімально робочого RAG-асистента для студентів СумДУ, який надає
+швидкий доступ до інформації з нормативних документів університету
+(https://normative.sumdu.edu.ua/) з використанням технологій:
+- RAG (Retrieval-Augmented Generation)
+- SGR (Schema-Guided Reasoning) - https://abdullin.com/schema-guided-reasoning/
+
+================================================================================
+2. ОСНОВНІ ВИМОГИ MVP
+================================================================================
+
+2.1 ФУНКЦІОНАЛЬНІ ВИМОГИ:
+--------------------------
+✓ Обробка запитів студентів природною мовою (українською/російською)
+✓ Пошук релевантної інформації в базі нормативних документів
+✓ Генерація відповідей з посиланнями на конкретні джерела
+✓ Структуроване цитування джерел у форматі:
+  "Джерело 1 'Положення 2133' ст. 24"
+✓ Підтримка SGR для покращення точності відповідей
+✓ CRUD операції для документів через API
+✓ Завантаження документів з URL (crawling) або upload PDF/TXT
+
+2.2 ТЕХНІЧНІ ВИМОГИ:
+---------------------
+✓ API Framework: FastAPI
+✓ AI Framework: Pydantic AI
+✓ LLM: Grok API (xAI)
+✓ Векторна БД: PostgreSQL + pgvector
+✓ Crawler: Crawl4AI (для обходу захисту normative.sumdu.edu.ua)
+✓ Embeddings: Cohere (embed-multilingual-v3.0)
+
+2.3 ЩО НЕ ВХОДИТЬ В MVP:
+-------------------------
+✗ Автоматичний моніторинг оновлень документів
+✗ Система кешування запитів
+✗ Аутентифікація та авторизація
+✗ Адміністративна панель (UI)
+✗ Детальні метрики та аналітика
+
+================================================================================
+3. АРХІТЕКТУРА СИСТЕМИ
+================================================================================
+
+┌─────────────────────────────────────────┐
+│       CLIENT (HTTP Requests)            │
+│    (Postman / Frontend / Bot)           │
+└──────────────────┬──────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────┐
+│         FastAPI (main.py)               │
+│                                         │
+│  Routes:                                │
+│  - POST /api/query                      │
+│  - GET/POST/PUT/DELETE /api/documents   │
+│  - GET /health                          │
+└──────────────────┬──────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────┐
+│         SERVICES LAYER                  │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │  Query Service                  │   │
+│  │  - RAG Pipeline координація     │   │
+│  └─────────────────────────────────┘   │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │  Document Service               │   │
+│  │  - CRUD операції                │   │
+│  │  - Обробка документів           │   │
+│  └─────────────────────────────────┘   │
+│                                         │
+│  ┌─────────────────────────────────┐   │
+│  │  Crawler Service (Crawl4AI)     │   │
+│  │  - Парсинг normative.sumdu      │   │
+│  └─────────────────────────────────┘   │
+└──────────────────┬──────────────────────┘
+                   │
+        ┌──────────┴──────────┐
+        ▼                     ▼
+┌───────────────┐     ┌───────────────────┐
+│  RAG ENGINE   │     │   SGR MODULE      │
+│               │     │                   │
+│  Retriever ───┼────▶│  Reasoner         │
+│  Generator    │     │  Schemas          │
+│  Pipeline     │     │  Validators       │
+└───────┬───────┘     └───────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│       DATA LAYER                        │
+│                                         │
+│  ┌──────────────────────┐              │
+│  │   PostgreSQL         │              │
+│  │   + pgvector         │              │
+│  │                      │              │
+│  │  Tables:             │              │
+│  │  - documents         │              │
+│  │  - chunks            │              │
+│  │    (with embeddings) │              │
+│  └──────────────────────┘              │
+└─────────────────────────────────────────┘
+
+================================================================================
+4. СТРУКТУРА ФАЙЛІВ ПРОЕКТУ
+================================================================================
+
+rag-asistent/
+│
+├── .venv/                          # Віртуальне середовище
+├── .gitignore                      # Git ignore
+├── pyproject.toml                  # Конфігурація (НЕ ЧІПАТИ!)
+├── TZ_ARCHITECTURE.txt             # Цей файл - ТЗ та архітектура
+├── README.md                       # Документація проекту
+│
+├── config/                         # Конфігурація
+│   ├── __init__.py
+│   └── settings.py                 # Налаштування (DB, API keys, Grok)
+│
+├── src/
+│   ├── __init__.py
+│   │
+│   ├── api/                        # FastAPI endpoints
+│   │   ├── __init__.py
+│   │   ├── deps.py                 # Dependencies (DB session, etc.)
+│   │   └── routes/
+│   │       ├── __init__.py
+│   │       ├── query.py            # POST /api/query - RAG запити
+│   │       ├── documents.py        # CRUD для документів
+│   │       └── health.py           # GET /health
+│   │
+│   ├── models/                     # Моделі даних
+│   │   ├── __init__.py
+│   │   ├── database.py             # SQLAlchemy моделі
+│   │   └── schemas.py              # Pydantic схеми для API
+│   │
+│   ├── db/                         # База даних
+│   │   ├── __init__.py
+│   │   └── session.py              # Підключення до PostgreSQL
+│   │
+│   ├── services/                   # Бізнес-логіка
+│   │   ├── __init__.py
+│   │   ├── document_service.py     # Робота з документами
+│   │   ├── crawler_service.py      # Crawl4AI для парсингу
+│   │   └── query_service.py        # Обробка RAG запитів
+│   │
+│   ├── rag/                        # RAG Engine
+│   │   ├── __init__.py
+│   │   ├── retriever.py            # Векторний пошук (pgvector)
+│   │   ├── generator.py            # Генерація через Grok
+│   │   └── pipeline.py             # RAG pipeline
+│   │
+│   ├── sgr/                        # Schema-Guided Reasoning
+│   │   ├── __init__.py
+│   │   ├── schemas.py              # Pydantic схеми для міркувань
+│   │   └── reasoner.py             # SGR логіка
+│   │
+│   ├── embeddings/                 # Embeddings
+│   │   ├── __init__.py
+│   │   └── embedder.py             # Створення векторів
+│   │
+│   └── utils/                      # Утиліти
+│       ├── __init__.py
+│       └── text_utils.py           # Chunking, обробка тексту
+│
+├── scripts/                        # Допоміжні скрипти
+│   ├── init_db.py                  # Створення таблиць БД
+│   └── crawl_sumdu.py              # Crawl4AI для парсингу сайту
+│
+├── tests/                          # Тести
+│   ├── __init__.py
+│   └── test_api.py                 # Тести API
+│
+├── data/                           # Дані (не в git)
+│   └── documents/                  # PDF/TXT файли
+│
+└── main.py                         # Точка входу FastAPI
+
+================================================================================
+5. ДЕТАЛЬНИЙ ОПИС КОМПОНЕНТІВ
+================================================================================
+
+5.1 CONFIG/SETTINGS.PY
+-----------------------
+Призначення: Централізовані налаштування додатку
+Зміст:
+  - DATABASE_URL: підключення до PostgreSQL
+  - GROK_API_KEY: ключ для Grok API
+  - EMBEDDING_MODEL: назва моделі для embeddings
+  - CHUNK_SIZE: розмір чанків (за замовчуванням 500 токенів)
+  - TOP_K: кількість результатів для retrieval (за замовчуванням 5)
+  - VECTOR_DIMENSIONS: розмірність векторів (1024 для Cohere embed-multilingual-v3.0)
+
+5.2 SRC/MODELS/DATABASE.PY
+---------------------------
+Призначення: SQLAlchemy ORM моделі
+Таблиці:
+
+  Document:
+    - id: Integer, Primary Key
+    - title: String (назва документа)
+    - document_number: String (номер документа, наприклад "2133")
+    - url: String (nullable, якщо crawled)
+    - file_path: String (nullable, якщо uploaded)
+    - status: Enum('processing', 'completed', 'failed')
+    - created_at: DateTime
+    - updated_at: DateTime
+    - chunks: Relationship → Chunk (cascade delete)
+
+  Chunk:
+    - id: Integer, Primary Key
+    - document_id: Integer, Foreign Key → Document
+    - content: Text (текст чанку)
+    - chunk_index: Integer (порядковий номер)
+    - article_number: String (nullable, наприклад "ст. 24")
+    - metadata: JSON (nullable, додаткові дані)
+    - embedding: Vector(1024) - pgvector (Cohere embed-multilingual-v3.0)
+    - created_at: DateTime
+
+5.3 SRC/MODELS/SCHEMAS.PY
+--------------------------
+Призначення: Pydantic схеми для валідації API
+
+Query Schemas:
+  - QueryRequest:
+      query: str
+      top_k: int = 5
+
+  - QueryResponse:
+      answer: str
+      sources: List[Source]
+      reasoning_path: Optional[str]
+
+  - Source:
+      document_title: str
+      document_number: str
+      article: Optional[str]
+      excerpt: str
+
+Document Schemas:
+  - DocumentCreate:
+      url: Optional[str]
+      file: Optional[UploadFile]
+      title: str
+      document_number: Optional[str]
+
+  - DocumentUpdate:
+      title: Optional[str]
+      document_number: Optional[str]
+
+  - DocumentResponse:
+      id: int
+      title: str
+      document_number: Optional[str]
+      url: Optional[str]
+      status: str
+      created_at: datetime
+      chunks_count: int
+
+  - DocumentList:
+      items: List[DocumentResponse]
+      total: int
+      skip: int
+      limit: int
+
+5.4 SRC/DB/SESSION.PY
+----------------------
+Призначення: Управління сесіями бази даних
+Функції:
+  - get_engine(): створення SQLAlchemy engine
+  - get_session(): dependency для FastAPI
+  - init_db(): ініціалізація БД (створення таблиць)
+
+5.5 SRC/EMBEDDINGS/EMBEDDER.PY
+-------------------------------
+Призначення: Створення векторних представлень тексту
+Функції:
+  - create_embedding(text: str) → List[float]
+  - create_embeddings_batch(texts: List[str]) → List[List[float]]
+  - create_query_embedding(query: str) → List[float]
+Використовує: Cohere API (embed-multilingual-v3.0)
+
+5.6 SRC/UTILS/TEXT_UTILS.PY
+----------------------------
+Призначення: Обробка та підготовка тексту
+Функції:
+  - chunk_text(text: str, chunk_size: int) → List[str]
+  - extract_article_number(text: str) → Optional[str]
+  - clean_text(text: str) → str
+  - count_tokens(text: str) → int
+
+5.7 SRC/SGR/SCHEMAS.PY
+-----------------------
+Призначення: Pydantic схеми для Schema-Guided Reasoning
+Схеми:
+  - QueryUnderstanding:
+      intent: str
+      key_terms: List[str]
+      expected_document_type: Optional[str]
+
+  - ContextStructure:
+      relevant_chunks: List[Dict]
+      reasoning_path: str
+      confidence: float
+
+  - AnswerStructure:
+      answer_text: str
+      confidence: float
+      sources_used: List[int]
+
+5.8 SRC/SGR/REASONER.PY
+------------------------
+Призначення: Логіка Schema-Guided Reasoning
+Функції:
+  - understand_query(query: str) → QueryUnderstanding
+  - structure_context(chunks: List, query_understanding) → ContextStructure
+  - validate_answer(answer: str, context) → bool
+
+5.9 SRC/RAG/RETRIEVER.PY
+-------------------------
+Призначення: Векторний пошук через pgvector
+Функції:
+  - search(query_embedding: List[float], top_k: int) → List[Chunk]
+  - search_by_text(query: str, top_k: int) → List[Chunk]
+Використовує: pgvector cosine similarity
+
+5.10 SRC/RAG/GENERATOR.PY
+--------------------------
+Призначення: Генерація відповідей через Grok
+Функції:
+  - generate_answer(query: str, context: List[Chunk]) → str
+  - create_prompt(query: str, chunks: List[Chunk]) → str
+Використовує: Grok API через Pydantic AI
+
+5.11 SRC/RAG/PIPELINE.PY
+-------------------------
+Призначення: Координація повного RAG процесу
+Функції:
+  - process_query(query: str, top_k: int) → QueryResponse
+Послідовність:
+  1. SGR: розуміння запиту
+  2. Створення embedding для запиту
+  3. Retrieval: пошук релевантних chunks
+  4. SGR: структурування контексту
+  5. Generation: створення відповіді
+  6. Форматування джерел
+
+5.12 SRC/SERVICES/CRAWLER_SERVICE.PY
+-------------------------------------
+Призначення: Парсинг документів через Crawl4AI
+Функції:
+  - crawl_url(url: str) → Dict[content, title, metadata]
+  - extract_metadata(html: str) → Dict
+  - clean_html(html: str) → str
+Використовує: Crawl4AI для обходу захисту сайту
+
+5.13 SRC/SERVICES/DOCUMENT_SERVICE.PY
+---------------------------------------
+Призначення: Бізнес-логіка роботи з документами
+Функції:
+  - create_from_url(url, title) → Document
+  - create_from_file(file, title, doc_number) → Document
+  - get_document(doc_id) → Document
+  - list_documents(skip, limit) → List[Document]
+  - update_document(doc_id, data) → Document
+  - delete_document(doc_id) → bool
+  - reprocess_document(doc_id) → Document
+Внутрішні:
+  - _parse_document(content) → List[Chunk]
+  - _create_embeddings(chunks) → None
+  - _save_to_db(document, chunks) → None
+
+5.14 SRC/SERVICES/QUERY_SERVICE.PY
+------------------------------------
+Призначення: Обробка користувацьких запитів
+Функції:
+  - process_query(query: str, top_k: int) → QueryResponse
+  - format_sources(chunks: List[Chunk]) → List[Source]
+
+5.15 SRC/API/DEPS.PY
+---------------------
+Призначення: FastAPI dependencies
+Функції:
+  - get_db() → Session
+  - get_settings() → Settings
+
+5.16 SRC/API/ROUTES/QUERY.PY
+-----------------------------
+Ендпоінти:
+  POST /api/query
+    Request: QueryRequest
+    Response: QueryResponse
+
+5.17 SRC/API/ROUTES/DOCUMENTS.PY
+---------------------------------
+Ендпоінти:
+  GET    /api/documents          # Список документів
+  GET    /api/documents/{id}     # Деталі документа
+  POST   /api/documents          # Створити (URL або file)
+  PUT    /api/documents/{id}     # Оновити метадані
+  DELETE /api/documents/{id}     # Видалити
+  POST   /api/documents/{id}/reprocess  # Перегенерувати
+
+5.18 SRC/API/ROUTES/HEALTH.PY
+------------------------------
+Ендпоінти:
+  GET /health                    # Базовий health check
+  GET /health/detailed           # Детальний статус
+
+5.19 MAIN.PY
+-------------
+Призначення: Точка входу FastAPI додатку
+Зміст:
+  - Створення FastAPI app
+  - Підключення роутерів
+  - CORS middleware
+  - Exception handlers
+  - Startup/shutdown events
+
+5.20 SCRIPTS/INIT_DB.PY
+------------------------
+Призначення: Ініціалізація бази даних
+Функції:
+  - Створення розширення pgvector
+  - Створення таблиць через SQLAlchemy
+  - Створення індексів для векторного пошуку
+
+5.21 SCRIPTS/CRAWL_SUMDU.PY
+----------------------------
+Призначення: Тестування та масове завантаження документів
+Функції:
+  - test_crawl(url): тест парсингу одного документа
+  - crawl_all(): масове завантаження з нормативної бази
+
+================================================================================
+6. БАЗА ДАНИХ (PostgreSQL + pgvector)
+================================================================================
+
+6.1 ТАБЛИЦЯ: documents
+-----------------------
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    document_number VARCHAR(50),
+    url TEXT,
+    file_path TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'processing',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_documents_number ON documents(document_number);
+CREATE INDEX idx_documents_status ON documents(status);
+
+6.2 ТАБЛИЦЯ: chunks
+--------------------
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE chunks (
+    id SERIAL PRIMARY KEY,
+    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    article_number VARCHAR(20),
+    metadata JSONB,
+    embedding VECTOR(1536),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_chunks_document ON chunks(document_id);
+CREATE INDEX idx_chunks_embedding ON chunks
+    USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 100);
+
+================================================================================
+7. API ENDPOINTS (ПОВНИЙ СПИСОК)
+================================================================================
+
+7.1 QUERY ENDPOINTS
+--------------------
+POST /api/query
+  Description: Обробка RAG запиту
+  Request Body:
+    {
+      "query": "Які умови отримання стипендії?",
+      "top_k": 5
+    }
+  Response:
+    {
+      "answer": "Для отримання стипендії студент повинен...",
+      "sources": [
+        {
+          "document_title": "Положення про стипендіальне забезпечення",
+          "document_number": "2133",
+          "article": "ст. 24",
+          "excerpt": "Студент має право..."
+        }
+      ]
+    }
+
+7.2 DOCUMENT ENDPOINTS
+-----------------------
+GET /api/documents?skip=0&limit=20
+  Description: Список документів з пагінацією
+  Response:
+    {
+      "items": [...],
+      "total": 50,
+      "skip": 0,
+      "limit": 20
+    }
+
+GET /api/documents/{id}
+  Description: Деталі документа
+  Response:
+    {
+      "id": 1,
+      "title": "...",
+      "document_number": "2133",
+      "chunks_count": 45,
+      "status": "completed",
+      "created_at": "2025-12-14T10:00:00"
+    }
+
+POST /api/documents
+  Description: Створити документ (URL або file upload)
+  Request (URL):
+    {
+      "url": "https://normative.sumdu.edu.ua/...",
+      "title": "Положення..."
+    }
+  Request (File):
+    Content-Type: multipart/form-data
+    file: <PDF>
+    title: "Положення..."
+    document_number: "2133"
+  Response:
+    {
+      "id": 1,
+      "status": "processing",
+      "created_at": "..."
+    }
+
+PUT /api/documents/{id}
+  Description: Оновити метадані документа
+  Request:
+    {
+      "title": "Нова назва",
+      "document_number": "2133-A"
+    }
+  Response:
+    {
+      "id": 1,
+      "title": "Нова назва",
+      ...
+    }
+
+DELETE /api/documents/{id}
+  Description: Видалити документ
+  Response:
+    {
+      "status": "deleted",
+      "deleted_chunks": 45
+    }
+
+POST /api/documents/{id}/reprocess
+  Description: Перегенерувати chunks та embeddings
+  Response:
+    {
+      "status": "processing"
+    }
+
+7.3 HEALTH ENDPOINTS
+---------------------
+GET /health
+  Description: Базовий health check
+  Response:
+    {
+      "status": "ok",
+      "database": "connected",
+      "grok_api": "ok"
+    }
+
+GET /health/detailed
+  Description: Детальний статус системи
+  Response:
+    {
+      "status": "ok",
+      "database": "connected",
+      "grok_api": "ok",
+      "documents_count": 25,
+      "chunks_count": 1250,
+      "embedding_model": "text-embedding-3-small"
+    }
+
+================================================================================
+8. ТЕХНОЛОГІЧНИЙ СТЕК
+================================================================================
+
+Backend & API:
+  - FastAPI 0.115+         # API framework
+  - Uvicorn               # ASGI server
+  - Pydantic 2.0+         # Data validation
+
+AI & ML:
+  - Pydantic AI           # AI framework з structured output
+  - Grok API (xAI)        # Large Language Model
+  - Cohere API            # Embeddings (embed-multilingual-v3.0)
+  - tiktoken              # Token counting
+
+Database:
+  - PostgreSQL 15+        # Relational database
+  - pgvector              # Vector similarity search
+  - SQLAlchemy 2.0+       # ORM
+  - asyncpg               # Async PostgreSQL driver
+
+Web Scraping:
+  - Crawl4AI              # Advanced web crawler (anti-bot bypass)
+  - BeautifulSoup4        # HTML parsing
+  - pypdf                 # PDF parsing
+
+Utilities:
+  - python-multipart      # File uploads
+  - python-dotenv         # Environment variables
+  - httpx                 # HTTP client
+
+Testing:
+  - pytest                # Testing framework
+  - pytest-asyncio        # Async testing
+
+================================================================================
+9. ЗМІННІ ОТОЧЕННЯ (.env)
+================================================================================
+
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/rag_assistant
+
+# Grok API (xAI)
+GROK_API_KEY=your_grok_api_key_here
+GROK_MODEL=grok-beta
+
+# Cohere (для embeddings)
+COHERE_API_KEY=your_cohere_api_key_here
+EMBEDDING_MODEL=embed-multilingual-v3.0
+VECTOR_DIMENSIONS=1024
+
+# RAG Settings
+CHUNK_SIZE=500
+CHUNK_OVERLAP=50
+TOP_K=5
+
+# Server
+HOST=0.0.0.0
+PORT=8000
+DEBUG=True
+
+================================================================================
+10. WORKFLOW РОЗРОБКИ ТА ВИКОРИСТАННЯ
+================================================================================
+
+10.1 ПОЧАТКОВЕ НАЛАШТУВАННЯ
+-----------------------------
+1. Клонувати репозиторій
+2. Створити .env файл з налаштуваннями
+3. Встановити PostgreSQL з pgvector
+4. Активувати віртуальне середовище: .venv\Scripts\activate
+5. Встановити залежності: uv pip install -r requirements.txt
+6. Ініціалізувати БД: python scripts/init_db.py
+
+10.2 ЗАВАНТАЖЕННЯ ДОКУМЕНТІВ
+------------------------------
+Варіант 1 - Через API (URL):
+  curl -X POST http://localhost:8000/api/documents \
+    -H "Content-Type: application/json" \
+    -d '{"url": "https://normative.sumdu.edu.ua/...", "title": "..."}'
+
+Варіант 2 - Через API (File):
+  curl -X POST http://localhost:8000/api/documents \
+    -F "file=@document.pdf" \
+    -F "title=Положення 2133" \
+    -F "document_number=2133"
+
+Варіант 3 - Через скрипт:
+  python scripts/crawl_sumdu.py --url "https://..."
+
+10.3 ЗАПУСК СЕРВЕРА
+---------------------
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+10.4 ВИКОРИСТАННЯ API
+-----------------------
+# Запит до асистента
+curl -X POST http://localhost:8000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Які умови отримання стипендії?"}'
+
+# Список документів
+curl http://localhost:8000/api/documents
+
+# Health check
+curl http://localhost:8000/health
+
+================================================================================
+11. RAG PIPELINE FLOW
+================================================================================
+
+1. USER QUERY
+   ↓
+2. SGR: Query Understanding
+   - Визначення наміру (intent)
+   - Виділення ключових термінів
+   - Очікуваний тип документа
+   ↓
+3. EMBEDDING CREATION
+   - Створення векторного представлення запиту
+   ↓
+4. RETRIEVAL (pgvector)
+   - Cosine similarity search
+   - Повернення Top-K chunks
+   ↓
+5. SGR: Context Structuring
+   - Оцінка релевантності chunks
+   - Побудова reasoning path
+   - Валідація контексту
+   ↓
+6. PROMPT CREATION
+   - Формування промпту для Grok
+   - Включення контексту з chunks
+   - Інструкції щодо формату відповіді
+   ↓
+7. GENERATION (Grok LLM)
+   - Генерація відповіді
+   - Структурований вивід через Pydantic AI
+   ↓
+8. CITATION FORMATTING
+   - Витягування джерел з chunks
+   - Форматування: "Джерело 1 'Положення 2133' ст. 24"
+   ↓
+9. RESPONSE
+   - Відповідь + список джерел
+
+================================================================================
+12. НАСТУПНІ КРОКИ РОЗРОБКИ
+================================================================================
+
+PHASE 1: FOUNDATION (Поточна)
+  ✓ Створення структури проекту
+  ✓ Налаштування конфігурації
+  ✓ Моделі бази даних
+  ✓ Базові утиліти
+
+PHASE 2: CORE COMPONENTS
+  □ Embeddings service
+  □ Text utilities (chunking)
+  □ Database session management
+  □ SGR schemas and reasoner
+
+PHASE 3: RAG ENGINE
+  □ Retriever (pgvector search)
+  □ Generator (Grok integration)
+  □ Pipeline orchestration
+
+PHASE 4: SERVICES
+  □ Crawler service (Crawl4AI)
+  □ Document service (CRUD)
+  □ Query service (RAG processing)
+
+PHASE 5: API
+  □ API dependencies
+  □ Routes (query, documents, health)
+  □ Main FastAPI app
+
+PHASE 6: SCRIPTS & TOOLS
+  □ Database initialization
+  □ Crawling scripts
+  □ Testing utilities
+
+PHASE 7: TESTING & DEPLOYMENT
+  □ Unit tests
+  □ Integration tests
+  □ Documentation
+  □ Deployment setup
+
+================================================================================
+13. ОБМЕЖЕННЯ ТА ПРИПУЩЕННЯ MVP
+================================================================================
+
+ОБМЕЖЕННЯ:
+  - Підтримка тільки українською та російською мовами
+  - Обробка тільки текстових документів (PDF, TXT, HTML)
+  - Максимальний розмір файлу: 10 MB
+  - Без автентифікації (відкритий API)
+  - Синхронна обробка документів (без черг)
+
+ПРИПУЩЕННЯ:
+  - PostgreSQL доступний локально або віддалено
+  - Grok API та Cohere API доступні
+  - Документи на normative.sumdu.edu.ua мають структуру
+  - Достатньо RAM для embeddings в пам'яті
+  - Crawl4AI може обійти захист сайту
+
+================================================================================
+14. МЕТРИКИ УСПІХУ MVP
+================================================================================
+
+Функціональні:
+  ✓ API повертає відповіді на 90%+ запитів
+  ✓ Кожна відповідь має мінімум 1 джерело
+  ✓ Час відповіді < 5 секунд
+  ✓ CRUD операції працюють коректно
+
+Технічні:
+  ✓ Векторний пошук працює швидко (< 1 сек)
+  ✓ База даних підтримує 1000+ документів
+  ✓ Crawl4AI успішно парсить 80%+ сторінок
+  ✓ Embeddings генеруються коректно
+
+Якісні:
+  ✓ Відповіді релевантні запитам
+  ✓ Джерела правильно відформатовані
+  ✓ SGR покращує точність відповідей
+
+================================================================================
+КІНЕЦЬ ДОКУМЕНТУ
+================================================================================
