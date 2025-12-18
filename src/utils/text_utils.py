@@ -50,6 +50,8 @@ def chunk_text(
 
     # Clean text
     text = clean_text(text)
+    if not text: 
+        return []
 
     # Split into sentences (простий підхід)
     sentences = re.split(r'(?<=[.!?])\s+', text)
