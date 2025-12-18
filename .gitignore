@@ -26,6 +26,9 @@ venv/
 ENV/
 env/
 
+# Claude
+.claude/
+
 # Environment variables
 .env
 .env.local
